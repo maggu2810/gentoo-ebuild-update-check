@@ -1,0 +1,133 @@
+#!/bin/sh
+
+# Markus Rathgeb <maggu2810@web.de>
+
+show_help() {
+	cat ${0} | grep -A 9999 '# _parse_ begin help' | grep -B 9999 '# _parse_ end help' | grep "^[[:space:]]*\""
+	exit 1;
+}
+
+cleanup () {
+   cat ${1} | \
+   grep -v \
+   -e "^[[:space:]]*$" \
+   -e "^[[:space:]]*#" \
+   -e "^[[:space:]]*$" \
+   -e '^[[:space:]]*KEYWORDS=' \
+   -e '^[[:space:]]*HOMEPAGE=' \
+   -e '^[[:space:]]*LICENSE=' \
+   -e '^[[:space:]]*SRC_URI=' \
+   -e '^[[:space:]]*eerror' \
+   -e '^[[:space:]]*einfo' \
+   -e '^[[:space:]]*ewarn' \
+   -e '^[[:space:]]*elog'
+} 
+
+while [ ! -z ${1} ]; do
+	case "${1}" in
+# _parse_ begin help
+		"-vb") # be verbose: show diff
+			OPT_VERBOSE_DIFF="true"
+		;;
+		"-vo") # be verbose: show skipped ebuild from overlays
+			OPT_VERBOSE_OVERLAYS="true"
+		;;
+		"-k") # output the package including version information
+			OPT_KEEP_VERSION="true"
+		;;
+		"-a") # show also packages with no special changes
+			OPT_SHOW_ALL="true"
+		;;
+		"-s") # strict mode - compare the complete ebuild
+			OPT_STRICT="true"
+		;;
+		"-o") # overlays activated - search in overlays too
+			OPT_OVERLAYS="true"
+		;;
+		"-h") # display help
+			show_help
+		;;
+# _parse_ end help
+		*)
+			echo "unknown option: \"${1}\""
+			show_help
+		;;
+	esac
+	shift
+done
+
+PKGDB="/var/db/pkg/"
+PORTDIR="/usr/portage"
+OFFICIAL_TREE="gentoo"
+
+I="`mktemp --tmpdir ebuild.installed.XXXXXXXXXX`"
+A="`mktemp --tmpdir ebuild.actual.XXXXXXXXXX`"
+
+if [ "${OPT_STRICT}" = "true" ]; then
+	PARSE_CMD="cat"
+else
+	PARSE_CMD="cleanup"
+fi;
+
+cd "${PKGDB}" || exit 1
+find . -mindepth 3 -maxdepth 3 -type f -name '*.ebuild' | sort | while read FILE
+do
+		# parse the db file tree
+	[[ "${FILE}" =~ ([^/]*)/([^/]*)/([^/]*)-([^-]*-r[^.-]*).ebuild ]] ||
+	[[ "${FILE}" =~ ([^/]*)/([^/]*)/([^/]*)-([^-]*).ebuild ]]
+
+		# category
+	CAT="${BASH_REMATCH[1]}"
+		# package with version
+	PKGwV="${BASH_REMATCH[2]}"
+		# package
+	PKG="${BASH_REMATCH[3]}"
+		# version
+	VER="${BASH_REMATCH[4]}"
+
+		# installed ebuild
+	EBUILD_I="${PKGDB}/${FILE}"
+		# repository: official portage tree, overlay name
+	REPO="$(cat ${PKGDB}/${CAT}/${PKGwV}/repository 2>/dev/null)" || REPO="${OFFICIAL_TREE}"
+	
+	if [ "${OPT_OVERLAYS}" != "true" -a "${REPO}" != "${OFFICIAL_TREE}" ]; then
+		[[ "${OPT_VERBOSE_OVERLAYS}" = "true" ]] && echo -e "skipped '${CAT}/${PKGwV}' from overlay '${REPO}'"
+		continue
+	fi
+
+		# path to repository
+	REPO_PATH="$(portageq get_repo_path / ${REPO})"
+		# actual ebuild
+	EBUILD_A="${REPO_PATH}/${CAT}/${PKG}/${PKG}-${VER}.ebuild"
+	
+		# skip if the actual ebuild will not be found
+	if [ ! -e ${EBUILD_A} ]; then
+		echo "ebuild not found: ${EBUILD_A} [but: ${EBUILD_I}]"
+		continue
+	fi
+	
+	if [ "${OPT_KEEP_VERSION}" = "true" ]; then
+		PKGOUT="=${CAT}/${PKGwV}"
+	else
+		PKGOUT="${CAT}/${PKG}"
+	fi
+
+	${PARSE_CMD} ${EBUILD_I} > ${I}
+	${PARSE_CMD} ${EBUILD_A} > ${A}
+	
+	DIFF=$(diff -Naur ${I} ${A})
+	
+	# if there is a difference after cleanup
+	if [ ${?} -eq 1 ]; then
+		echo ${PKGOUT}
+		[[ "${OPT_VERBOSE_DIFF}" = "true" ]] && echo -e "${DIFF}\n"
+	# if there is no difference after cleanup
+	else
+		[[ "${OPT_SHOW_ALL}" = "true" ]] && echo "accepted: ${PKGOUT}"
+	fi
+
+	# remove the temporary files
+	rm ${A} ${P}
+done   
+
+exit 0

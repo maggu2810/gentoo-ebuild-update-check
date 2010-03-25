@@ -73,8 +73,8 @@ cd "${PKGDB}" || exit 1
 find . -mindepth 3 -maxdepth 3 -type f -name '*.ebuild' | sort | while read FILE
 do
 		# parse the db file tree
-	[[ "${FILE}" =~ ([^/]*)/([^/]*)/([^/]*)-([^-]*-r[^.-]*).ebuild ]] ||
-	[[ "${FILE}" =~ ([^/]*)/([^/]*)/([^/]*)-([^-]*).ebuild ]]
+	[[ "${FILE}" =~ ./([^/]*)/([^/]*)/([^/]*)-([^-]*-r[^.-]*).ebuild ]] ||
+	[[ "${FILE}" =~ ./([^/]*)/([^/]*)/([^/]*)-([^-]*).ebuild ]]
 
 		# category
 	CAT="${BASH_REMATCH[1]}"
@@ -97,6 +97,10 @@ do
 
 		# path to repository
 	REPO_PATH="$(portageq get_repo_path / ${REPO})"
+	if [ "${REPO_PATH}" = "None" ]; then
+		echo "Skip ebuild \"=${CAT}/${PKGwV}\", because path of repository \"${REPO}\" could not be found."
+		continue
+	fi
 		# actual ebuild
 	EBUILD_A="${REPO_PATH}/${CAT}/${PKG}/${PKG}-${VER}.ebuild"
 	
